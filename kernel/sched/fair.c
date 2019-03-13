@@ -7976,16 +7976,13 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 	int delta = 0;
 	int task_boost = per_task_boost(p);
 	int boosted = (schedtune_task_boost(p) > 0) || (task_boost > 0);
-	int start_cpu = get_start_cpu(p);
+	int start_cpu = get_start_cpu(p, sync_boost);
 
-<<<<<<< HEAD
 	if (is_many_wakeup(sibling_count_hint) && prev_cpu != cpu &&
 			cpumask_test_cpu(prev_cpu, &p->cpus_allowed))
 		return prev_cpu;
 
 	start_cpu = get_start_cpu(p, sync_boost);
-=======
->>>>>>> 6a0a9ca35815 (Revert "sched/walt: Improve the scheduler")
 	if (start_cpu < 0)
 		goto eas_not_ready;
 
