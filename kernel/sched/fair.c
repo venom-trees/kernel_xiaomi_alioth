@@ -12116,6 +12116,7 @@ static inline bool nohz_idle_balance(struct rq *this_rq, enum cpu_idle_type idle
 static inline void nohz_newidle_balance(struct rq *this_rq) { }
 #endif /* CONFIG_NO_HZ_COMMON */
 
+#ifdef CONFIG_SCHED_WALT
 static bool silver_has_big_tasks(void)
 {
 	int cpu;
@@ -12130,6 +12131,7 @@ static bool silver_has_big_tasks(void)
 
 	return false;
 }
+#endif
 
 /*
  * idle_balance is called by schedule() if this_cpu is about to become
@@ -12165,9 +12167,10 @@ int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
 	 */
 	if (!cpu_active(this_cpu))
 		return 0;
-
+#ifdef CONFIG_SCHED_WALT
 	if (force_lb || prefer_spread)
 		avg_idle = ULLONG_MAX;
+#endif
 	/*
 	 * This is OK, because current is on_cpu, which avoids it being picked
 	 * for load-balance and preemption/IRQs are still disabled avoiding
