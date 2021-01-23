@@ -13,6 +13,7 @@
 #include <linux/export.h>
 #include <linux/percpu.h>
 #include <linux/init.h>
+#include <linux/interrupt.h>
 #include <linux/gfp.h>
 #include <linux/smp.h>
 #include <linux/cpu.h>
@@ -279,6 +280,21 @@ static void flush_smp_call_function_queue(bool warn_cpu_offline)
 		csd_unlock(csd);
 		func(info);
 	}
+}
+
+void flush_smp_call_function_from_idle(void)
+{
+	unsigned long flags;
+
+	if (llist_empty(this_cpu_ptr(&call_single_queue)))
+		return;
+
+	local_irq_save(flags);
+	flush_smp_call_function_queue(true);
+	if (local_softirq_pending())
+		do_softirq();
+
+	local_irq_restore(flags);
 }
 
 /*
