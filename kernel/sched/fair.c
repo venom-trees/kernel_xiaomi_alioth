@@ -2901,61 +2901,6 @@ static inline void update_scan_period(struct task_struct *p, int new_cpu)
 
 #endif /* CONFIG_NUMA_BALANCING */
 
-DEFINE_PER_CPU(unsigned long *, prioritized_task_mask);
-DEFINE_PER_CPU(int, prioritized_task_nr);
-
-static bool bitmap_testbit(unsigned long *map, unsigned long bit)
-{
-	if (*(map + BIT_WORD(bit)) & BIT_MASK(bit))
-		return true;
-
-	return false;
-}
-
-static void inc_prioritized_task_count(struct rq *rq, struct task_struct *p)
-{
-	bool bitset;
-
-	if (is_min_capacity_cpu(cpu_of(rq)))
-		return;
-
-	if (unlikely(p->pid > PID_MAX_DEFAULT))
-		return;
-
-	bitset = bitmap_testbit(per_cpu(prioritized_task_mask, cpu_of(rq)),
-				p->pid);
-
-	if (schedtune_prefer_high_cap(p) && p->prio <= DEFAULT_PRIO) {
-		if (likely(!bitset)) {
-			__bitmap_set(per_cpu(prioritized_task_mask, cpu_of(rq)),
-				     p->pid, 1);
-			per_cpu(prioritized_task_nr, cpu_of(rq))++;
-		}
-	} else if (unlikely(bitset)) {
-		__bitmap_clear(per_cpu(prioritized_task_mask, cpu_of(rq)),
-			       p->pid, 1);
-		if (per_cpu(prioritized_task_nr, cpu_of(rq)) > 0)
-			per_cpu(prioritized_task_nr, cpu_of(rq))--;
-	}
-}
-
-static void dec_prioritized_task_count(struct rq *rq, struct task_struct *p)
-{
-	if (is_min_capacity_cpu(cpu_of(rq)))
-		return;
-
-	if (unlikely(p->pid > PID_MAX_DEFAULT))
-		return;
-
-	if (bitmap_testbit(per_cpu(prioritized_task_mask, cpu_of(rq)),
-			   p->pid)) {
-		__bitmap_clear(per_cpu(prioritized_task_mask, cpu_of(rq)),
-			       p->pid, 1);
-		if (per_cpu(prioritized_task_nr, cpu_of(rq)) > 0)
-			per_cpu(prioritized_task_nr, cpu_of(rq))--;
-	}
-}
-
 static void
 account_entity_enqueue(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
@@ -9143,12 +9088,9 @@ static inline int migrate_degrades_locality(struct task_struct *p,
 static inline bool can_migrate_boosted_task(struct task_struct *p,
 			int src_cpu, int dst_cpu)
 {
-	if ((per_task_boost(p) == TASK_BOOST_STRICT_MAX &&
-	     task_in_related_thread_group(p) &&
-	     (capacity_orig_of(dst_cpu) < capacity_orig_of(src_cpu))) ||
-	    (schedtune_prefer_high_cap(p) && p->prio <= DEFAULT_PRIO &&
-	     !is_min_capacity_cpu(src_cpu) && is_min_capacity_cpu(dst_cpu) &&
-	     per_cpu(prioritized_task_nr, src_cpu <= 1)))
+	if (per_task_boost(p) == TASK_BOOST_STRICT_MAX &&
+		task_in_related_thread_group(p) &&
+		(capacity_orig_of(dst_cpu) < capacity_orig_of(src_cpu)))
 		return false;
 	return true;
 }
