@@ -238,6 +238,13 @@ config SCHEDUTIL_DOWN_RATE_LIMIT
 
 endif
 
+config CPUFREQ_GOV_SCHEDUTIL_TARGET_LOAD
+	bool "'schedutil' extra function"
+	default n
+	depends on CPU_FREQ_GOV_SCHEDUTIL
+	help
+	  This will provide a new parameter called "target loads".
+
 comment "CPU frequency scaling drivers"
 
 config CPUFREQ_DT
