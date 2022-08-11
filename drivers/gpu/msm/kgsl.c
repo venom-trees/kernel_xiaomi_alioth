@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2008-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <uapi/linux/sched/types.h>
@@ -1316,7 +1315,7 @@ kgsl_sharedmem_find(struct kgsl_process_private *private, uint64_t gpuaddr)
 	if (!private)
 		return NULL;
 
-	if (!kgsl_mmu_gpuaddr_in_range(private->pagetable, gpuaddr, 0))
+	if (!kgsl_mmu_gpuaddr_in_range(private->pagetable, gpuaddr))
 		return NULL;
 
 	spin_lock(&private->mem_lock);
@@ -2188,7 +2187,7 @@ long kgsl_ioctl_gpu_aux_command(struct kgsl_device_private *dev_priv,
 	cmdlist = u64_to_user_ptr(param->cmdlist);
 
 	/* Create a draw object for KGSL_GPU_AUX_COMMAND_TIMELINE */
-	if (copy_struct_from_user(&generic, sizeof(generic),
+	if (kgsl_copy_struct_from_user(&generic, sizeof(generic),
 		cmdlist, param->cmdsize)) {
 		ret = -EFAULT;
 		goto err;
@@ -2610,15 +2609,6 @@ static int memdesc_sg_virt(struct kgsl_memdesc *memdesc, unsigned long useraddr)
 
 	ret = sg_alloc_table_from_pages(memdesc->sgt, pages, npages,
 					0, memdesc->size, GFP_KERNEL);
-
-	if (ret)
-		goto out;
-
-	ret = kgsl_cache_range_op(memdesc, 0, memdesc->size,
-			KGSL_CACHE_OP_FLUSH);
-
-	if (ret)
-		sg_free_table(memdesc->sgt);
 out:
 	if (ret) {
 		for (i = 0; i < npages; i++)
@@ -2677,6 +2667,15 @@ static int kgsl_setup_anon_useraddr(struct kgsl_pagetable *pagetable,
 }
 
 #ifdef CONFIG_DMA_SHARED_BUFFER
+static int match_file(const void *p, struct file *file, unsigned int fd)
+{
+	/*
+	 * We must return fd + 1 because iterate_fd stops searching on
+	 * non-zero return, but 0 is a valid fd.
+	 */
+	return (p == file) ? (fd + 1) : 0;
+}
+
 static void _setup_cache_mode(struct kgsl_mem_entry *entry,
 		struct vm_area_struct *vma)
 {
@@ -2714,6 +2713,8 @@ static int kgsl_setup_dmabuf_useraddr(struct kgsl_device *device,
 	vma = find_vma(current->mm, hostptr);
 
 	if (vma && vma->vm_file) {
+		int fd;
+
 		ret = check_vma_flags(vma, entry->memdesc.flags);
 		if (ret) {
 			up_read(&current->mm->mmap_sem);
@@ -2729,13 +2730,10 @@ static int kgsl_setup_dmabuf_useraddr(struct kgsl_device *device,
 			return -EFAULT;
 		}
 
-		/*
-		 * Take a refcount because dma_buf_put() decrements the
-		 * refcount
-		 */
-		get_file(vma->vm_file);
-
-		dmabuf = vma->vm_file->private_data;
+		/* Look for the fd that matches this the vma file */
+		fd = iterate_fd(current->files, 0, match_file, vma->vm_file);
+		if (fd != 0)
+			dmabuf = dma_buf_get(fd - 1);
 	}
 
 	if (IS_ERR_OR_NULL(dmabuf)) {
@@ -5341,9 +5339,9 @@ int kgsl_device_platform_probe(struct kgsl_device *device)
 	dma_set_max_seg_size(device->dev, KGSL_DMA_BIT_MASK);
 
 	/* Initialize the memory pools */
-	kgsl_init_page_pools(device->pdev);
+	kgsl_init_page_pools(device);
 
-	status = kgsl_reclaim_init();
+	status = kgsl_reclaim_init(device);
 	if (status)
 		goto error_close_mmu;
 
@@ -5367,22 +5365,6 @@ int kgsl_device_platform_probe(struct kgsl_device *device)
 	pm_qos_add_request(&device->pwrctrl.pm_qos_req_dma,
 				PM_QOS_CPU_DMA_LATENCY,
 				PM_QOS_DEFAULT_VALUE);
-
-	if (device->pwrctrl.l2pc_cpus_mask) {
-		struct pm_qos_request *qos = &device->pwrctrl.l2pc_cpus_qos;
-
-		qos->type = PM_QOS_REQ_AFFINE_CORES;
-
-		cpumask_empty(&qos->cpus_affine);
-		for_each_possible_cpu(cpu) {
-			if ((1 << cpu) & device->pwrctrl.l2pc_cpus_mask)
-				cpumask_set_cpu(cpu, &qos->cpus_affine);
-		}
-
-		pm_qos_add_request(&device->pwrctrl.l2pc_cpus_qos,
-				PM_QOS_CPU_DMA_LATENCY,
-				PM_QOS_DEFAULT_VALUE);
-	}
 
 	device->events_wq = alloc_workqueue("kgsl-events",
 		WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_SYSFS | WQ_HIGHPRI, 0);
@@ -5420,8 +5402,6 @@ void kgsl_device_platform_remove(struct kgsl_device *device)
 	kgsl_pwrctrl_uninit_sysfs(device);
 
 	pm_qos_remove_request(&device->pwrctrl.pm_qos_req_dma);
-	if (device->pwrctrl.l2pc_cpus_mask)
-		pm_qos_remove_request(&device->pwrctrl.l2pc_cpus_qos);
 
 	idr_destroy(&device->context_idr);
 	idr_destroy(&device->timelines);
@@ -5476,7 +5456,7 @@ static void kgsl_core_exit(void)
 static int __init kgsl_core_init(void)
 {
 	int result = 0;
-	struct sched_param param = { .sched_priority = 16 };
+	struct sched_param param = { .sched_priority = 2 };
 
 	/* alloc major and minor device numbers */
 	result = alloc_chrdev_region(&kgsl_driver.major, 0,
