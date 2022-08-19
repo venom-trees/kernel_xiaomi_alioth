@@ -520,7 +520,7 @@ struct sock {
 	struct sock_reuseport __rcu	*sk_reuseport_cb;
 	struct rcu_head		sk_rcu;
 
-	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_USE(1, spinlock_t sk_peer_lock);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
