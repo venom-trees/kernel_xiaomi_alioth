@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2017 Google, Inc.
- * Copyright (C) 2021 XiaoMi, Inc.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -167,6 +166,7 @@ binder_alloc_get_free_async_space(struct binder_alloc *alloc)
 	return free_async_space;
 }
 
+#if IS_ENABLED(CONFIG_MIHW)
 /**
  * binder_alloc_get_free_space() - get free space available
  * @alloc:      binder_alloc for this proc
@@ -174,6 +174,7 @@ binder_alloc_get_free_async_space(struct binder_alloc *alloc)
  * Return:      the bytes remaining in the address-space
 */
 size_t binder_alloc_get_free_space(struct binder_alloc *alloc);
+#endif
 
 unsigned long
 binder_alloc_copy_user_to_buffer(struct binder_alloc *alloc,

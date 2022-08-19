@@ -71,7 +71,9 @@ struct binderfs_info {
 	struct binderfs_mount_opts mount_opts;
 	int device_count;
 	struct dentry *proc_log_dir;
+#if IS_ENABLED(CONFIG_MIHW)
 	struct dentry *proc_transaction_log_dir;
+#endif
 };
 
 extern const struct file_operations binder_fops;
