@@ -11,7 +11,6 @@
 #include <linux/random.h>
 #include <linux/utsname.h>
 #include <linux/workqueue.h>
-
 #include "lrng_drng_mgr.h"
 #include "lrng_es_aux.h"
 #include "lrng_es_cpu.h"
