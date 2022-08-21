@@ -46,7 +46,7 @@
 #define SHA256_H5	0x9b05688cUL
 #define SHA256_H6	0x1f83d9abUL
 #define SHA256_H7	0x5be0cd19UL
-
+#define SHA1_WORKSPACE_WORDS	16
 #define SHA384_H0	0xcbbb9d5dc1059ed8ULL
 #define SHA384_H1	0x629a292a367cd507ULL
 #define SHA384_H2	0x9159015a3070dd17ULL
@@ -112,4 +112,7 @@ extern int crypto_sha512_update(struct shash_desc *desc, const u8 *data,
 
 extern int crypto_sha512_finup(struct shash_desc *desc, const u8 *data,
 			       unsigned int len, u8 *hash);
+
+void sha_init(__u32 *buf);
+void sha_transform(__u32 *digest, const char *data, __u32 *W);
 #endif
