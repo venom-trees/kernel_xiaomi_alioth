@@ -645,6 +645,8 @@ config XLOGCHAR
 	  Implements a high performance log driver
 endmenu
 
+source "drivers/char/lrng/Kconfig"
+
 config RANDOM_TRUST_CPU
 	bool "Initialize RNG using CPU RNG instructions"
 	default y
