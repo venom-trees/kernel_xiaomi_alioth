@@ -696,8 +696,7 @@ KBUILD_CFLAGS	+= $(call cc-disable-warning, format-overflow)
 KBUILD_CFLAGS	+= $(call cc-disable-warning, int-in-bool-context)
 KBUILD_CFLAGS	+= $(call cc-disable-warning, address-of-packed-member)
 
-alioth_flags := := -mcpu=cortex-a77 \
-		 -mllvm -polly \
+alioth_flags := -mllvm -polly \
 		 -mllvm -polly-run-inliner \
 		 -mllvm -polly-optimizer=isl \
 		 -mllvm -polly-enable-simplify \
@@ -709,7 +708,7 @@ alioth_flags := := -mcpu=cortex-a77 \
 ifdef CONFIG_ALIOTH_OPTIMIZE
 KBUILD_CFLAGS += $(alioth_flags)
 KBUILD_AFLAGS += $(alioth_flags)
-KBUILD_LDFLAGS += -mllvm $(alioth_flags)
+KBUILD_LDFLAGS += $(alioth_flags)
 endif
 
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
