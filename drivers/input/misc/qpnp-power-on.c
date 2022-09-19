@@ -167,6 +167,47 @@ enum qpnp_pon_version {
 	QPNP_PON_GEN2,
 };
 
+/*struct qpnp_pon {
+	struct device		*dev;
+	struct regmap		*regmap;
+	struct input_dev	*pon_input;
+	struct qpnp_pon_config	*pon_cfg;
+	struct pon_regulator	*pon_reg_cfg;
+	struct list_head	list;
+	struct delayed_work	bark_work;
+	struct delayed_work	collect_d_work;
+	bool			collect_d_in_progress;
+	struct dentry		*debugfs;
+	struct task_struct	*longpress_task;
+	u16			base;
+	u8			subtype;
+	u8			pon_ver;
+	u8			warm_reset_reason1;
+	u8			warm_reset_reason2;
+	int			num_pon_config;
+	int			num_pon_reg;
+	int			pon_trigger_reason;
+	int			pon_power_off_reason;
+	u32			dbc_time_us;
+	u32			uvlo;
+	int			warm_reset_poff_type;
+	int			hard_reset_poff_type;
+	int			shutdown_poff_type;
+	int			resin_warm_reset_type;
+	int			resin_hard_reset_type;
+	int			resin_shutdown_type;
+	bool			is_spon;
+	bool			store_hard_reset_reason;
+	bool			resin_hard_reset_disable;
+	bool			resin_shutdown_disable;
+	bool			ps_hold_hard_reset_disable;
+	bool			ps_hold_shutdown_disable;
+	bool			kpdpwr_dbc_enable;
+	bool			resin_pon_reset;
+	ktime_t			kpdpwr_last_release_time;
+	ktime_t			time_kpdpwr_bark;
+};*/
+
 enum pon_type {
 	PON_KPDPWR	 = PON_POWER_ON_TYPE_KPDPWR,
 	PON_RESIN	 = PON_POWER_ON_TYPE_RESIN,
@@ -215,6 +256,7 @@ struct qpnp_pon {
 	u16			base;
 	u8			subtype;
 	u8			pon_ver;
+	ktime_t			time_kpdpwr_bark;
 	u8			warm_reset_reason1;
 	u8			warm_reset_reason2;
 	int			num_pon_config;
