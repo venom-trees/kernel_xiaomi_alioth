@@ -1,14 +1,13 @@
 #!/usr/bin/bash 
 
 CLANG_DIR="/home/venom98/QuetzalKernel/p-clang/bin"
-BLDHST="QUETZAL"
+BLDHST="Ven0mKernel"
 DEVICE="alioth"
-BVER="EXP"
 DEFCONFIG="vendor/alioth_defconfig"
 
 
-TG_BOT_TOKEN="5330416569:AAE0jza3XIR6xgNrB0fiqVPq4L-RMoJuCbs"
-TG_CHAT_ID="-198181011"
+TG_BOT_TOKEN="5771499665:AAEe8AMCYW89g_0pqyuWtFkMqCuTdG8T_Uo"
+TG_CHAT_ID="198181011"
 
 # A function to exit on SIGINT.
 exit_on_signal_SIGINT() {
@@ -62,9 +61,9 @@ kmake() {
 }
 
 kcopy() {
-cp out/arch/arm64/boot/dtbo.img ./../../zip/Quetzalkernel/
-cp out/arch/arm64/boot/dtb.img ./../../zip/Quetzalkernel/
-cp out/arch/arm64/boot/Image ./../../zip/Quetzalkernel/
+cp out/arch/arm64/boot/dtbo.img ./../../zip/Ven0mkernel/
+cp out/arch/arm64/boot/dtb.img ./../../zip/Ven0mkernel/
+cp out/arch/arm64/boot/Image ./../../zip/Ven0mkernel/
 }
 
 
