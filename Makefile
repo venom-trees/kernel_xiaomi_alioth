@@ -701,7 +701,6 @@ alioth_flags := -mcpu=cortex-a77
 ifdef CONFIG_ALIOTH_OPTIMIZE
 KBUILD_CFLAGS += $(alioth_flags)
 KBUILD_AFLAGS += $(alioth_flags)
-KBUILD_LDFLAGS += -mllvm $(alioth_flags)
 endif
 
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
