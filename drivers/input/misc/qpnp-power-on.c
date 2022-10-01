@@ -136,6 +136,7 @@
 
 #define QPNP_PON_UVLO_DLOAD_EN			BIT(7)
 #define QPNP_PON_SMPL_EN			BIT(7)
+#define QPNP_PON_KPDPWR_ON			BIT(0)
 
 /* Limits */
 #define QPNP_PON_S1_TIMER_MAX			10256
@@ -165,6 +166,47 @@ enum qpnp_pon_version {
 	QPNP_PON_GEN1_V2,
 	QPNP_PON_GEN2,
 };
+
+/*struct qpnp_pon {
+	struct device		*dev;
+	struct regmap		*regmap;
+	struct input_dev	*pon_input;
+	struct qpnp_pon_config	*pon_cfg;
+	struct pon_regulator	*pon_reg_cfg;
+	struct list_head	list;
+	struct delayed_work	bark_work;
+	struct delayed_work	collect_d_work;
+	bool			collect_d_in_progress;
+	struct dentry		*debugfs;
+	struct task_struct	*longpress_task;
+	u16			base;
+	u8			subtype;
+	u8			pon_ver;
+	u8			warm_reset_reason1;
+	u8			warm_reset_reason2;
+	int			num_pon_config;
+	int			num_pon_reg;
+	int			pon_trigger_reason;
+	int			pon_power_off_reason;
+	u32			dbc_time_us;
+	u32			uvlo;
+	int			warm_reset_poff_type;
+	int			hard_reset_poff_type;
+	int			shutdown_poff_type;
+	int			resin_warm_reset_type;
+	int			resin_hard_reset_type;
+	int			resin_shutdown_type;
+	bool			is_spon;
+	bool			store_hard_reset_reason;
+	bool			resin_hard_reset_disable;
+	bool			resin_shutdown_disable;
+	bool			ps_hold_hard_reset_disable;
+	bool			ps_hold_shutdown_disable;
+	bool			kpdpwr_dbc_enable;
+	bool			resin_pon_reset;
+	ktime_t			kpdpwr_last_release_time;
+	ktime_t			time_kpdpwr_bark;
+};*/
 
 enum pon_type {
 	PON_KPDPWR	 = PON_POWER_ON_TYPE_KPDPWR,
@@ -214,6 +256,7 @@ struct qpnp_pon {
 	u16			base;
 	u8			subtype;
 	u8			pon_ver;
+	ktime_t			time_kpdpwr_bark;
 	u8			warm_reset_reason1;
 	u8			warm_reset_reason2;
 	int			num_pon_config;
@@ -237,7 +280,7 @@ struct qpnp_pon {
 	bool			kpdpwr_dbc_enable;
 	bool			resin_pon_reset;
 	ktime_t			kpdpwr_last_release_time;
-	ktime_t			time_kpdpwr_bark;
+	bool			log_kpd_event;
 };
 
 int in_long_press;
@@ -1139,6 +1182,10 @@ static int qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 	 * Simulate a press event in case release event occurred without a press
 	 * event
 	 */
+	if (pon->log_kpd_event && (cfg->pon_type == PON_KPDPWR))
+		pr_info_ratelimited("PMIC input: KPDPWR status=0x%02x, KPDPWR_ON=%d\n",
+			pon_rt_sts, (pon_rt_sts & QPNP_PON_KPDPWR_ON));
+
 	if (!cfg->old_state && !key_status) {
 		input_report_key(pon->pon_input, cfg->key_code, 1);
 		input_sync(pon->pon_input);
@@ -1611,6 +1658,7 @@ static int qpnp_pon_config_kpdpwr_init(struct qpnp_pon *pon,
 				       struct device_node *node)
 {
 	int rc;
+	uint pon_rt_sts;
 
 	cfg->state_irq = platform_get_irq_byname(pdev, "kpdpwr");
 	if (cfg->state_irq < 0) {
@@ -1649,6 +1697,16 @@ static int qpnp_pon_config_kpdpwr_init(struct qpnp_pon *pon,
 	} else {
 		cfg->s2_cntl_addr = QPNP_PON_KPDPWR_S2_CNTL(pon);
 		cfg->s2_cntl2_addr = QPNP_PON_KPDPWR_S2_CNTL2(pon);
+	}
+
+	if (pon->log_kpd_event) {
+		/* Read PON_RT_STS status during driver initialization. */
+		rc = qpnp_pon_read(pon, QPNP_PON_RT_STS(pon), &pon_rt_sts);
+		if (rc < 0)
+			pr_err("failed to read QPNP_PON_RT_STS rc=%d\n", rc);
+
+		pr_info("KPDPWR status at init=0x%02x, KPDPWR_ON=%d\n",
+			pon_rt_sts, (pon_rt_sts & QPNP_PON_KPDPWR_ON));
 	}
 
 	return 0;
@@ -2684,6 +2742,9 @@ static int qpnp_pon_probe(struct platform_device *pdev)
 		spin_unlock_irqrestore(&spon_list_slock, flags);
 		pon->is_spon = true;
 	}
+
+	pon->log_kpd_event = of_property_read_bool(dev->of_node,
+				"qcom,log-kpd-event");
 
 	/* Register the PON configurations */
 	rc = qpnp_pon_config_init(pon, pdev);
