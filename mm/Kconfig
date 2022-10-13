@@ -216,11 +216,17 @@ config MEMORY_HOTREMOVE
 # PA-RISC 7xxx's spinlock_t would enlarge struct page from 32 to 44 bytes.
 # DEBUG_SPINLOCK and DEBUG_LOCK_ALLOC spinlock_t also enlarge struct page.
 #
+# Moto huangzq2: disable SPLIT_RSS_COUNTING if we have ulmk.
+# ulmk fully relies on rss in proc/pid/statm, but rss in statm sometimes
+# is zero if we enabled SPLIT_RSS_COUNTING, checked with Google,
+# they agree to disalbe this. Also, our performance test didn't show any
+# performance downgrade.
 config SPLIT_PTLOCK_CPUS
 	int
 	default "999999" if !MMU
 	default "999999" if ARM && !CPU_CACHE_VIPT
 	default "999999" if PARISC && !PA20
+	default "999999" if HAVE_USERSPACE_LOW_MEMORY_KILLER
 	default "4"
 
 config ARCH_ENABLE_SPLIT_PMD_PTLOCK
@@ -263,6 +269,18 @@ config COMPACTION
           it and then we would be really interested to hear about that at
           linux-mm@kvack.org.
 
+config PROCESS_RECLAIM
+	bool "Enable process reclaim"
+	depends on PROC_FS
+	default n
+	help
+	 It allows to reclaim pages of the process by /proc/pid/reclaim.
+
+	 (echo file > /proc/PID/reclaim) reclaims file-backed pages only.
+	 (echo anon > /proc/PID/reclaim) reclaims anonymous pages only.
+	 (echo all > /proc/PID/reclaim) reclaims all pages.
+
+	 Any other value is ignored.
 #
 # support for page migration
 #
@@ -529,15 +547,6 @@ config CMA_DEBUGFS
 	help
 	  Turns on the DebugFS interface for CMA.
 
-config  CMA_ALLOW_WRITE_DEBUGFS
-	depends on CMA_DEBUGFS
-	bool "Allow CMA debugfs write"
-	help
-	  Say 'y' here to allow the CMA debugfs write.
-	  CMA debugfs write could be risky as it allows
-	  cma allocation, so it is not recommended to
-	  enable this option on any production device.
-
 config CMA_AREAS
 	int "Maximum count of the CMA areas"
 	depends on CMA
@@ -643,15 +652,6 @@ config ZSMALLOC_STAT
 	  information to userspace via debugfs.
 	  If unsure, say N.
 
-config VMAP_LAZY_PURGING_FACTOR
-	int "multiplier to the size of purged vmap areas"
-	default "8" if ARM
-	default "32"
-	help
-	  It is used as a multiplier to the max VA pages purged in a
-	  single attempt. For 32-bit in order to reduce fragmentation
-	  of vmalloc space, we decrease the default value to "8".
-
 config MM_EVENT_STAT
 	bool "Track per-process MM event"
 	depends on MMU
@@ -711,10 +711,18 @@ config DEFERRED_STRUCT_PAGE_INIT
 	  lifetime of the system until these kthreads finish the
 	  initialisation.
 
+config PAGE_IDLE_FLAG
+	bool
+	select PAGE_EXTENSION if !64BIT
+	help
+	  This adds PG_idle and PG_young flags to 'struct page'.  PTE Accessed
+	  bit writers can set the state of the bit in the flags so that PTE
+	  Accessed bit readers may avoid disturbance.
+
 config IDLE_PAGE_TRACKING
 	bool "Enable idle page tracking"
 	depends on SYSFS && MMU
-	select PAGE_EXTENSION if !64BIT
+	select PAGE_IDLE_FLAG
 	help
 	  This feature allows to estimate the amount of user pages that have
 	  not been touched during a given period of time. This information can
@@ -837,15 +845,6 @@ config SPECULATIVE_PAGE_FAULT
 	 allocating, it is failing its processing and a classic page fault
 	 is then tried.
 
-config HAVE_USERSPACE_LOW_MEMORY_KILLER
-	bool "Have userspace low memory killer"
-	default n
-	help
-	  The page allocator cannot directly call into a
-	  userspace low memory killer as it can call into the OOM killer.
-	  Therefore, add a timeout mechanism to give the userspace
-	  low memory killer a chance to run.
-
 config GUP_BENCHMARK
 	bool "Enable infrastructure for get_user_pages_fast() benchmarking"
 	default n
@@ -858,30 +857,40 @@ config GUP_BENCHMARK
 config ARCH_HAS_PTE_SPECIAL
 	bool
 
+# multi-gen LRU {
+config LRU_GEN
+	bool "Multi-Gen LRU"
+	depends on MMU
+	# the following options can use up the spare bits in page flags
+	depends on !MAXSMP && (64BIT || !SPARSEMEM || SPARSEMEM_VMEMMAP)
+	help
+	  A high performance LRU implementation to overcommit memory. See
+	  Documentation/admin-guide/mm/multigen_lru.rst for details.
+
+config LRU_GEN_ENABLED
+	bool "Enable by default"
+	depends on LRU_GEN
+	help
+	  This option enables the multi-gen LRU by default.
+
+config LRU_GEN_STATS
+	bool "Full stats for debugging"
+	depends on LRU_GEN
+	help
+	  Do not enable this option unless you plan to look at historical stats
+	  from evicted generations for debugging purpose.
+
+	  This option has a per-memcg and per-node memory overhead.
+# }
+
+source "mm/damon/Kconfig"
+
+config EMERGENCY_MEMORY
+	bool "Enable emergency memory"
+	default n
+	help
+	 This enables the migration type MIGRATE_EMERGENCY which reserves
+	 a small amount of memory for non-costly non-NOWARN page allocation
+	 failure.
+
 endmenu
-
-config PROCESS_RECLAIM
-	bool "Enable process reclaim"
-	depends on PROC_FS
-	default y
-	help
-	 It allows to reclaim pages of the process by /proc/pid/reclaim.
-
-	 (echo file > /proc/PID/reclaim) reclaims file-backed pages only.
-	 (echo anon > /proc/PID/reclaim) reclaims anonymous pages only.
-	 (echo all > /proc/PID/reclaim) reclaims all pages.
-
-	 (echo addr size-byte > /proc/PID/reclaim) reclaims pages in
-	 (addr, addr + size-bytes) of the process.
-
-	 Any other value is ignored.
-
-config FORCE_ALLOC_FROM_DMA_ZONE
-	bool "Force certain memory allocators to always return ZONE_DMA32 memory"
-	depends on ZONE_DMA32
-	help
-	  Ensure certain memory allocators always return memory from ZONE_DMA32.
-	  This option helps ensure that clients who require ZONE_DMA32 memory are
-	  always using ZONE_DMA32 memory.
-
-	  If unsure, say "n".

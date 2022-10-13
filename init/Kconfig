@@ -555,16 +555,6 @@ config PSI_DEFAULT_DISABLED
 
 	  Say N if unsure.
 
-config PSI_FTRACE
-	bool "Insert debug hooks for PSI ftrace events"
-	default n
-	depends on PSI
-	help
-	  If not set, PSI ftrace events will be disabled and
-	  will not incur any performance penalty.
-	  If set, PSI ftrace events may be
-	  enabled.
-
 endmenu # "CPU/Task time and stats accounting"
 
 config CPU_ISOLATION
@@ -765,6 +755,41 @@ config UCLAMP_BUCKETS_COUNT
 	  If in doubt, use the default value.
 
 endmenu
+
+menu "FAIR Scheuler tunables"
+
+choice
+	prompt "Utilization's PELT half-Life"
+	default PELT_UTIL_HALFLIFE_16
+	help
+	  Allows choosing one of the possible values for the PELT half-life to
+	  be used for the update of the utilization of tasks and CPUs.
+	  The half-life is the amount of [ms] required by the PELT signal to
+	  build up to 50% utilization. The higher the half-life the longer it
+	  takes for a task to be represented as a big one.
+
+	  If not sure, use the default of 32 ms.
+
+config PELT_UTIL_HALFLIFE_32
+	bool "32 ms, default for server"
+
+config PELT_UTIL_HALFLIFE_16
+	bool "16 ms, suggested for interactive workloads"
+	help
+	  Use 16ms as PELT half-life value. This will increase the ramp-up and
+	  decay of utlization and load twice as fast as for the default
+	  configuration using 32ms.
+
+config PELT_UTIL_HALFLIFE_8
+	bool "8 ms, very fast"
+	help
+	  Use 8ms as PELT half-life value. This will increase the ramp-up and
+	  decay of utlization and load four time as fast as for the default
+	  configuration using 32ms.
+
+endchoice
+
+endmenu # FAIR Scheduler tunables"
 
 #
 # For architectures that want to enable the support for NUMA-affine scheduler
@@ -1093,6 +1118,42 @@ config SCHED_CORE_CTL
 
 	  If unsure, say N here.
 
+config MIHW
+	bool "enable miui optimization"
+	default n
+	help
+	  This adds support for enabling miui specific optimization.
+
+	  If unsure, say N here.
+
+config PACKAGE_RUNTIME_INFO
+	bool "stat:package runtime info on cluster"
+	default n
+	depends on MIHW
+	help
+	  This option can show package runtime info in sup/big/little core.
+
+config PERF_HUMANTASK
+	bool "enable feature humantask"
+	depends on MIHW && MILLET
+	default n
+	help
+	  support switch on/off of sched humantask.
+
+config KPERFEVENTS
+	bool "enable kperfevents"
+	depends on MIHW
+	default n
+	help
+	  support switch on/off of kperfevents.
+
+config PERF_CRITICAL_RT_TASK
+	bool "enable set rt binder thread" if EXPERT
+	depends on MIHW
+	default n
+	help
+	  speedui feature set BlastBufferQueue binder thread FIFO.
+
 menuconfig NAMESPACES
 	bool "Namespaces support" if EXPERT
 	depends on MULTIUSER
@@ -1356,8 +1417,6 @@ config BPF
 
 menuconfig EXPERT
 	bool "Configure standard kernel features (expert users)"
-	# Unhide debug options, to make the on-by-default options visible
-	select DEBUG_KERNEL
 	help
 	  This option allows certain base kernel options and settings
           to be disabled or tweaked. This is for specialized
@@ -1485,6 +1544,12 @@ config ELF_CORE
 	help
 	  Enable support for generating core dumps. Disabling saves about 4k.
 
+config SF_BINDER
+	default n
+	depends on MIHW
+	bool "surfaceflinger binder thread" if EXPERT
+	help
+	  Xiaomi restore surfaceflinger binder prio FIFO
 
 config PCSPKR_PLATFORM
 	bool "Enable PC-Speaker support" if EXPERT

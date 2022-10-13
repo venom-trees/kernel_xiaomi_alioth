@@ -21,7 +21,7 @@
 #include <linux/pinctrl/consumer.h>
 
 #define SPI_NUM_CHIPSELECT	(4)
-#define SPI_XFER_TIMEOUT_MS	(250)
+#define SPI_XFER_TIMEOUT_MS	(1500)
 #define SPI_AUTO_SUSPEND_DELAY	(250)
 /* SPI SE specific registers */
 #define SE_SPI_CPHA		(0x224)
@@ -932,6 +932,12 @@ static int spi_geni_prepare_transfer_hardware(struct spi_master *spi)
 		if (ret)
 			GENI_SE_ERR(mas->ipc, false, NULL,
 			"%s: Error %d pinctrl_select_state\n", __func__, ret);
+	}
+
+	if (mas->dev->power.disable_depth > 0) {
+		dev_err(mas->dev, "%s:disable_depth not zero %d\n",
+					__func__, mas->dev->power.disable_depth);
+		pm_runtime_enable(mas->dev);
 	}
 
 	if (!mas->setup || !mas->shared_ee) {
@@ -1951,6 +1957,7 @@ static struct platform_driver spi_geni_driver = {
 		.name = "spi_geni",
 		.pm = &spi_geni_pm_ops,
 		.of_match_table = spi_geni_dt_match,
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 	},
 };
 module_platform_driver(spi_geni_driver);

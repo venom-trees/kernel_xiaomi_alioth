@@ -9,7 +9,6 @@ menuconfig DRM
 	depends on (AGP || AGP=n) && !EMULATED_CMPXCHG && HAS_DMA
 	select DRM_PANEL_ORIENTATION_QUIRKS
 	select HDMI
-	select FB
 	select FB_CMDLINE
 	select I2C
 	select I2C_ALGOBIT
@@ -422,4 +421,8 @@ config DRM_PANEL_ORIENTATION_QUIRKS
 
 config DRM_LIB_RANDOM
 	bool
+	default n
+
+config MI_DRM_OPT
+	bool "Enable xiaomi early wakeup optimization"
 	default n

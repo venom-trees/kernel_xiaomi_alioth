@@ -8,10 +8,18 @@
 #include "pelt.h"
 
 #include <linux/interrupt.h>
-
 #include <trace/events/sched.h>
 
+#if IS_ENABLED(CONFIG_KPERFEVENTS)
+#include <trace/events/sched.h>
+#endif
+
 #include "walt.h"
+
+#if IS_ENABLED(CONFIG_KPERFEVENTS)
+#include <linux/kperfevents.h>
+#include <trace/events/kperfevents_sched.h>
+#endif
 
 int sched_rr_timeslice = RR_TIMESLICE;
 int sysctl_sched_rr_timeslice = (MSEC_PER_SEC / HZ) * RR_TIMESLICE;
@@ -1410,6 +1418,55 @@ static void dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flags)
 	enqueue_top_rt_rq(&rq->rt);
 }
 
+#if IS_ENABLED(CONFIG_KPERFEVENTS)
+static inline void
+update_stats_enqueue_wakeup(struct rq *rq, struct task_struct *p)
+{
+#ifdef CONFIG_SCHEDSTATS
+	struct sched_entity *se = &p->se;
+	if (se->statistics.sleep_start) {
+		u64 delta = rq_clock(rq) - se->statistics.sleep_start;
+		if ((s64)delta < 0)
+			delta = 0;
+
+		if (unlikely(delta > se->statistics.sleep_max))
+			se->statistics.sleep_max = delta;
+
+		se->statistics.sleep_start = 0;
+		se->statistics.sum_sleep_runtime += delta;
+
+		account_scheduler_latency(p, delta >> 10, 1);
+		trace_sched_stat_sleep(p, delta);
+		if (unlikely(is_above_kperfevents_threshold_nanos(delta)))
+			trace_kperfevents_sched_wait(p, delta, true);
+	}
+	if (se->statistics.block_start) {
+		u64 delta = rq_clock(rq) - se->statistics.block_start;
+		if ((s64)delta < 0)
+			delta = 0;
+
+		if (unlikely(delta > se->statistics.block_max))
+			se->statistics.block_max = delta;
+
+		se->statistics.block_start = 0;
+		se->statistics.sum_sleep_runtime += delta;
+
+		if (p->in_iowait) {
+			se->statistics.iowait_sum += delta;
+			se->statistics.iowait_count++;
+			trace_sched_stat_iowait(p, delta);
+		}
+
+		account_scheduler_latency(p, delta >> 10, 0);
+		trace_sched_stat_blocked(p, delta);
+		trace_sched_blocked_reason(p);
+		if (unlikely(is_above_kperfevents_threshold_nanos(delta)))
+			trace_kperfevents_sched_wait(p, delta, false);
+	}
+#endif
+}
+#endif /* CONFIG_KPERFEVENTS */
+
 /*
  * Adding/removing a task to/from a priority array:
  */
@@ -1420,8 +1477,12 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 
 	schedtune_enqueue_task(p, cpu_of(rq));
 
-	if (flags & ENQUEUE_WAKEUP)
+	if (flags & ENQUEUE_WAKEUP) {
+#if IS_ENABLED(CONFIG_KPERFEVENTS)
+		update_stats_enqueue_wakeup(rq, p);
+#endif
 		rt_se->timeout = 0;
+	}
 
 	enqueue_rt_entity(rt_se, flags);
 	walt_inc_cumulative_runnable_avg(rq, p);
@@ -1430,11 +1491,30 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 		enqueue_pushable_task(rq, p);
 }
 
+#if IS_ENABLED(CONFIG_KPERFEVENTS)
+static inline void
+update_stats_dequeue_sleep(struct rq *rq, struct task_struct *p)
+{
+#ifdef CONFIG_SCHEDSTATS
+	struct sched_entity *se = &p->se;
+	if (p->state & TASK_INTERRUPTIBLE)
+		se->statistics.sleep_start = rq_clock(rq);
+	if (p->state & TASK_UNINTERRUPTIBLE)
+		se->statistics.block_start = rq_clock(rq);
+#endif
+}
+#endif /* CONFIG_KPERFEVENTS */
+
 static void dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 {
 	struct sched_rt_entity *rt_se = &p->rt;
 
 	schedtune_dequeue_task(p, cpu_of(rq));
+
+#if IS_ENABLED(CONFIG_KPERFEVENTS)
+	if (flags & DEQUEUE_SLEEP)
+		update_stats_dequeue_sleep(rq, p);
+#endif
 
 	update_curr_rt(rq);
 	dequeue_rt_entity(rt_se, flags);
@@ -1598,6 +1678,22 @@ static void check_preempt_equal_prio(struct rq *rq, struct task_struct *p)
 	resched_curr(rq);
 }
 
+static int balance_rt(struct rq *rq, struct task_struct *p, struct rq_flags *rf)
+{
+	if (!on_rt_rq(&p->rt) && need_pull_rt_task(rq, p)) {
+		/*
+		 * This is OK, because current is on_cpu, which avoids it being
+		 * picked for load-balance and preemption/IRQs are still
+		 * disabled avoiding further scheduler activity on it and we've
+		 * not yet started the picking loop.
+		 */
+		rq_unpin_lock(rq, rf);
+		pull_rt_task(rq);
+		rq_repin_lock(rq, rf);
+	}
+
+	return sched_stop_runnable(rq) || sched_dl_runnable(rq) || sched_rt_runnable(rq);
+}
 #endif /* CONFIG_SMP */
 
 /*
@@ -1628,6 +1724,27 @@ static void check_preempt_curr_rt(struct rq *rq, struct task_struct *p, int flag
 #endif
 }
 
+static inline void set_next_task_rt(struct rq *rq, struct task_struct *p, bool first)
+{
+	p->se.exec_start = rq_clock_task(rq);
+
+	/* The running task is never eligible for pushing */
+	dequeue_pushable_task(rq, p);
+
+	if (!first)
+		return;
+
+	/*
+	 * If prev task was rt, put_prev_task() has already updated the
+	 * utilization. We only care of the case where we start to schedule a
+	 * rt task
+	 */
+	if (rq->curr->sched_class != &rt_sched_class)
+		update_rt_rq_load_avg(rq_clock_pelt(rq), rq, 0);
+
+	rt_queue_push_tasks(rq);
+}
+
 static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 						   struct rt_rq *rt_rq)
 {
@@ -1648,7 +1765,6 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 static struct task_struct *_pick_next_task_rt(struct rq *rq)
 {
 	struct sched_rt_entity *rt_se;
-	struct task_struct *p;
 	struct rt_rq *rt_rq  = &rq->rt;
 
 	do {
@@ -1657,65 +1773,21 @@ static struct task_struct *_pick_next_task_rt(struct rq *rq)
 		rt_rq = group_rt_rq(rt_se);
 	} while (rt_rq);
 
-	p = rt_task_of(rt_se);
-	p->se.exec_start = rq_clock_task(rq);
-
-	return p;
+	return rt_task_of(rt_se);
 }
 
 static struct task_struct *
 pick_next_task_rt(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
 	struct task_struct *p;
-	struct rt_rq *rt_rq = &rq->rt;
 
-	if (need_pull_rt_task(rq, prev)) {
-		/*
-		 * This is OK, because current is on_cpu, which avoids it being
-		 * picked for load-balance and preemption/IRQs are still
-		 * disabled avoiding further scheduler activity on it and we're
-		 * being very careful to re-start the picking loop.
-		 */
-		rq_unpin_lock(rq, rf);
-		pull_rt_task(rq);
-		rq_repin_lock(rq, rf);
-		/*
-		 * pull_rt_task() can drop (and re-acquire) rq->lock; this
-		 * means a dl or stop task can slip in, in which case we need
-		 * to re-start task selection.
-		 */
-		if (unlikely((rq->stop && task_on_rq_queued(rq->stop)) ||
-			     rq->dl.dl_nr_running))
-			return RETRY_TASK;
-	}
+	WARN_ON_ONCE(prev || rf);
 
-	/*
-	 * We may dequeue prev's rt_rq in put_prev_task().
-	 * So, we update time before rt_nr_running check.
-	 */
-	if (prev->sched_class == &rt_sched_class)
-		update_curr_rt(rq);
-
-	if (!rt_rq->rt_queued)
+	if (!sched_rt_runnable(rq))
 		return NULL;
 
-	put_prev_task(rq, prev);
-
 	p = _pick_next_task_rt(rq);
-
-	/* The running task is never eligible for pushing */
-	dequeue_pushable_task(rq, p);
-
-	rt_queue_push_tasks(rq);
-
-	/*
-	 * If prev task was rt, put_prev_task() has already updated the
-	 * utilization. We only care of the case where we start to schedule a
-	 * rt task
-	 */
-	if (rq->curr->sched_class != &rt_sched_class)
-		update_rt_rq_load_avg(rq_clock_pelt(rq), rq, 0);
-
+	set_next_task_rt(rq, p, true);
 	return p;
 }
 
@@ -2050,10 +2122,8 @@ static int push_rt_task(struct rq *rq)
 		return 0;
 
 retry:
-	if (unlikely(next_task == rq->curr)) {
-		WARN_ON(1);
+	if (WARN_ON(next_task == rq->curr))
 		return 0;
-	}
 
 	/*
 	 * It's possible that the next_task slipped in of
@@ -2598,16 +2668,6 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
 	}
 }
 
-static void set_curr_task_rt(struct rq *rq)
-{
-	struct task_struct *p = rq->curr;
-
-	p->se.exec_start = rq_clock_task(rq);
-
-	/* The running task is never eligible for pushing */
-	dequeue_pushable_task(rq, p);
-}
-
 static unsigned int get_rr_interval_rt(struct rq *rq, struct task_struct *task)
 {
 	/*
@@ -2629,10 +2689,11 @@ const struct sched_class rt_sched_class = {
 
 	.pick_next_task		= pick_next_task_rt,
 	.put_prev_task		= put_prev_task_rt,
+	.set_next_task          = set_next_task_rt,
 
 #ifdef CONFIG_SMP
+	.balance		= balance_rt,
 	.select_task_rq		= select_task_rq_rt,
-
 	.set_cpus_allowed       = set_cpus_allowed_common,
 	.rq_online              = rq_online_rt,
 	.rq_offline             = rq_offline_rt,
@@ -2640,7 +2701,6 @@ const struct sched_class rt_sched_class = {
 	.switched_from		= switched_from_rt,
 #endif
 
-	.set_curr_task          = set_curr_task_rt,
 	.task_tick		= task_tick_rt,
 
 	.get_rr_interval	= get_rr_interval_rt,

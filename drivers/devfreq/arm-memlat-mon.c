@@ -191,7 +191,10 @@ static void update_counts(struct memlat_cpu_grp *cpu_grp)
 			common_evs[STALL_IDX].last_delta =
 				common_evs[CYC_IDX].last_delta;
 
-		cpu_data->freq = common_evs[CYC_IDX].last_delta / delta;
+		if (delta != 0)
+			cpu_data->freq = common_evs[CYC_IDX].last_delta / delta;
+		else
+			cpu_data->freq = common_evs[CYC_IDX].last_delta;
 		cpu_data->stall_pct = mult_frac(100,
 				common_evs[STALL_IDX].last_delta,
 				common_evs[CYC_IDX].last_delta);
@@ -335,6 +338,9 @@ static void memlat_monitor_work(struct work_struct *work)
 		container_of(work, struct memlat_cpu_grp, work.work);
 	struct memlat_mon *mon;
 	unsigned int i;
+
+	if (oops_in_progress)
+		return;
 
 	mutex_lock(&cpu_grp->mons_lock);
 	if (!cpu_grp->num_active_mons)

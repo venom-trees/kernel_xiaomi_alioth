@@ -170,6 +170,8 @@ struct task_struct init_task
 	.softirqs_enabled = 1,
 #endif
 #ifdef CONFIG_LOCKDEP
+	.lockdep_depth = 0, /* no locks held yet */
+	.curr_chain_key = INITIAL_CHAIN_KEY,
 	.lockdep_recursion = 0,
 #endif
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
@@ -184,6 +186,10 @@ struct task_struct init_task
 #endif
 #ifdef CONFIG_SECURITY
 	.security	= NULL,
+#endif
+#if IS_ENABLED(CONFIG_KPERFEVENTS)
+	.kperfevents_lock = __RW_LOCK_UNLOCKED(tsk.kperfevents_lock),
+	.kperfevents = NULL,
 #endif
 };
 EXPORT_SYMBOL(init_task);

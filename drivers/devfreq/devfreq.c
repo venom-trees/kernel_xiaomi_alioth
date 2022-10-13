@@ -305,6 +305,9 @@ int update_devfreq(struct devfreq *devfreq)
 	int err = 0;
 	u32 flags = 0;
 
+	if (oops_in_progress)
+		return 0;
+
 	if (!mutex_is_locked(&devfreq->lock)) {
 		WARN(true, "devfreq->lock must be locked by the caller.\n");
 		return -EINVAL;
@@ -635,6 +638,9 @@ struct devfreq *devfreq_add_device(struct device *dev,
 	devfreq->previous_freq = profile->initial_freq;
 	devfreq->last_status.current_frequency = profile->initial_freq;
 	devfreq->data = data;
+#if IS_ENABLED(CONFIG_MIGT)
+	devfreq->flag = DF_NORMAL;
+#endif
 	devfreq->nb.notifier_call = devfreq_notifier_call;
 	devfreq->dev_suspended = false;
 
@@ -1255,7 +1261,7 @@ static ssize_t min_freq_show(struct device *dev, struct device_attribute *attr,
 	return sprintf(buf, "%lu\n", MAX(df->scaling_min_freq, df->min_freq));
 }
 
-static ssize_t max_freq_store(struct device *dev, struct device_attribute *attr,
+static ssize_t __maybe_unused max_freq_store(struct device *dev, struct device_attribute *attr,
 			      const char *buf, size_t count)
 {
 	struct devfreq *df = to_devfreq(dev);
@@ -1301,7 +1307,7 @@ static ssize_t max_freq_show(struct device *dev, struct device_attribute *attr,
 
 	return sprintf(buf, "%lu\n", MIN(df->scaling_max_freq, df->max_freq));
 }
-static DEVICE_ATTR_RW(max_freq);
+static DEVICE_ATTR_RO(max_freq);
 
 static ssize_t available_frequencies_show(struct device *d,
 					  struct device_attribute *attr,
@@ -1400,7 +1406,8 @@ static int __init devfreq_init(void)
 		return PTR_ERR(devfreq_class);
 	}
 
-	devfreq_wq = create_freezable_workqueue("devfreq_wq");
+	devfreq_wq = alloc_workqueue("devfreq_wq", WQ_HIGHPRI | WQ_FREEZABLE |
+				     WQ_UNBOUND | WQ_MEM_RECLAIM, 1);
 	if (!devfreq_wq) {
 		class_destroy(devfreq_class);
 		pr_err("%s: couldn't create workqueue\n", __FILE__);

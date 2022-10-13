@@ -3631,6 +3631,52 @@ void hdd_set_qmi_stats_enabled(struct hdd_context *hdd_ctx)
 }
 #endif
 
+#if IS_ENABLED(CONFIG_BOARD_ELISH) || IS_ENABLED(CONFIG_BOARD_ENUMA)
+static void
+hdd_install_key_comp_cb(struct wma_install_key_complete_param *param)
+{
+	struct hdd_context *hdd_ctx;
+	struct hdd_adapter *adapter;
+
+	if (!param) {
+		hdd_err("param is NULL");
+		return;
+	}
+
+	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
+	if (!hdd_ctx) {
+		hdd_err("hdd ctx is NULL");
+		return;
+	}
+
+	adapter = hdd_get_adapter_by_vdev(hdd_ctx, param->vdev_id);
+	if (!adapter) {
+		hdd_err("adapter is NULL");
+		return;
+	}
+
+	qdf_event_set(&adapter->install_key_complete);
+}
+
+#define HDD_INSTALL_KEY_TIMEOUT 200
+void hdd_start_install_key(struct hdd_adapter *adapter)
+{
+	hdd_enter();
+	qdf_event_reset(&adapter->install_key_complete);
+}
+
+int hdd_wait_for_install_key_complete(struct hdd_adapter *adapter)
+{
+	QDF_STATUS status;
+
+	hdd_enter();
+	status = qdf_wait_for_event_completion(&adapter->install_key_complete,
+					       HDD_INSTALL_KEY_TIMEOUT);
+	hdd_debug("exit with status %d", status);
+	return qdf_status_to_os_return(status);
+}
+#endif
+
 int hdd_wlan_start_modules(struct hdd_context *hdd_ctx, bool reinit)
 {
 	int ret = 0;
@@ -3751,6 +3797,10 @@ int hdd_wlan_start_modules(struct hdd_context *hdd_ctx, bool reinit)
 			ret = qdf_status_to_os_return(status);
 			goto psoc_close;
 		}
+
+#if IS_ENABLED(CONFIG_BOARD_ELISH) || IS_ENABLED(CONFIG_BOARD_ENUMA)
+		wma_register_install_key_complete_cb(hdd_install_key_comp_cb);
+#endif
 
 		hdd_set_qmi_stats_enabled(hdd_ctx);
 
@@ -6474,6 +6524,9 @@ struct hdd_adapter *hdd_open_adapter(struct hdd_context *hdd_ctx, uint8_t sessio
 	qdf_mutex_create(&adapter->blocked_scan_request_q_lock);
 	qdf_event_create(&adapter->acs_complete_event);
 	qdf_event_create(&adapter->peer_cleanup_done);
+#if IS_ENABLED(CONFIG_BOARD_ELISH) || IS_ENABLED(CONFIG_BOARD_ENUMA)
+	qdf_event_create(&adapter->install_key_complete);
+#endif
 	hdd_sta_info_init(&adapter->sta_info_list);
 	hdd_sta_info_init(&adapter->cache_sta_info_list);
 
@@ -6534,6 +6587,9 @@ static void __hdd_close_adapter(struct hdd_context *hdd_ctx,
 	qdf_list_destroy(&adapter->blocked_scan_request_q);
 	qdf_mutex_destroy(&adapter->blocked_scan_request_q_lock);
 	policy_mgr_clear_concurrency_mode(hdd_ctx->psoc, adapter->device_mode);
+#if IS_ENABLED(CONFIG_BOARD_ELISH) || IS_ENABLED(CONFIG_BOARD_ENUMA)
+	qdf_event_destroy(&adapter->install_key_complete);
+#endif
 	qdf_event_destroy(&adapter->acs_complete_event);
 	qdf_event_destroy(&adapter->peer_cleanup_done);
 	hdd_adapter_feature_update_work_deinit(adapter);
@@ -12521,17 +12577,6 @@ static int hdd_update_mac_addr_to_fw(struct hdd_context *hdd_ctx)
 	return 0;
 }
 
-static void reverse_byte_array(uint8_t *arr, int len)
-{
-	int i = 0;
-
-	for (i = 0; i < len / 2; i++) {
-		char temp = arr[i];
-		arr[i] = arr[len - i - 1];
-		arr[len - i - 1] = temp;
-	}
-}
-
 /**
  * hdd_initialize_mac_address() - API to get wlan mac addresses
  * @hdd_ctx: HDD Context
@@ -12567,7 +12612,6 @@ static int hdd_initialize_mac_address(struct hdd_context *hdd_ctx)
 
 	/* Use fw provided MAC */
 	if (!qdf_is_macaddr_zero(&hdd_ctx->hw_macaddr)) {
-		reverse_byte_array(&hdd_ctx->hw_macaddr.bytes[0], 6);
 		hdd_update_macaddr(hdd_ctx, hdd_ctx->hw_macaddr, false);
 		update_mac_addr_to_fw = false;
 		return 0;

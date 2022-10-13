@@ -72,6 +72,10 @@
 
 #include <trace/events/sched.h>
 
+#if IS_ENABLED(CONFIG_PERF_HUMANTASK)
+#include <linux/sched.h>
+#endif
+
 int suid_dumpable = 0;
 
 static LIST_HEAD(formats);
@@ -1033,6 +1037,7 @@ static int exec_mmap(struct mm_struct *mm)
 	active_mm = tsk->active_mm;
 	tsk->active_mm = mm;
 	tsk->mm = mm;
+	lru_gen_add_mm(mm);
 	/*
 	 * This prevents preemption while active_mm is being loaded and
 	 * it and mm are being updated, which could cause problems for
@@ -1045,6 +1050,7 @@ static int exec_mmap(struct mm_struct *mm)
 	activate_mm(active_mm, mm);
 	if (IS_ENABLED(CONFIG_ARCH_WANT_IRQS_OFF_ACTIVATE_MM))
 		local_irq_enable();
+	lru_gen_use_mm(mm);
 	tsk->mm->vmacache_seqnum = 0;
 	vmacache_flush(tsk);
 	task_unlock(tsk);
@@ -1250,7 +1256,27 @@ EXPORT_SYMBOL_GPL(__get_task_comm);
 
 void __set_task_comm(struct task_struct *tsk, const char *buf, bool exec)
 {
+
+#if IS_ENABLED(CONFIG_PERF_HUMANTASK)
+	struct task_struct *parent = find_task_by_vpid(tsk->tgid);
+	char *tmpbuf = kmalloc(128, GFP_KERNEL);
+#endif
 	task_lock(tsk);
+#if IS_ENABLED(CONFIG_PERF_HUMANTASK)
+	if (!strcmp(parent->comm, "system_server")) {
+		if (!strcmp(buf, "InputDispatcher")
+			|| !strcmp(buf, "InputReader")) {
+			tsk->human_task = MAX_LEVER + 1;
+		} else if (tmpbuf) {
+			memset(tmpbuf,0,128);
+			sprintf(tmpbuf, "Binder:%d_%X", tsk->tgid, 1);
+			if (!strcmp(tmpbuf, buf))
+				tsk->human_task = 1;
+		}
+	}
+	if (tmpbuf)
+		kfree(tmpbuf);
+#endif
 	trace_task_rename(tsk, buf);
 	strlcpy(tsk->comm, buf, sizeof(tsk->comm));
 	task_unlock(tsk);

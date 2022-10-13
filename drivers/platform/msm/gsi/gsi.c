@@ -32,6 +32,11 @@
 
 #define GSI_STTS_REG_BITS 32
 
+#ifndef MODULE
+ #undef EXPORT_SYMBOL
+ #define EXPORT_SYMBOL(x)
+#endif
+
 #ifndef CONFIG_DEBUG_FS
 void gsi_debugfs_init(void)
 {
@@ -617,7 +622,6 @@ static void gsi_process_chan(struct gsi_xfer_compl_evt *evt,
 	if (callback) {
 		if (unlikely(atomic_read(&ch_ctx->poll_mode))) {
 			GSIERR("Calling client callback in polling mode\n");
-			WARN_ON(1);
 		}
 		ch_ctx->props.xfer_cb(notify);
 	}

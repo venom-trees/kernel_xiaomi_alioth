@@ -3,6 +3,7 @@
  *
  * This code is based on drivers/scsi/ufs/ufshcd.h
  * Copyright (C) 2011-2013 Samsung India Software Operations
+ * Copyright (C) 2021 XiaoMi, Inc.
  * Copyright (c) 2013-2020, The Linux Foundation. All rights reserved.
  *
  * Authors:
@@ -77,6 +78,14 @@
 #include "ufs.h"
 #include "ufshci.h"
 
+#if defined(CONFIG_UFSFEATURE)
+#if defined(CONFIG_UFS3V1)
+#include "ufs31/ufsfeature.h"
+#elif defined(UFS3V0)
+#include "ufs30/ufsfeature.h"
+#endif
+#endif
+
 #define UFSHCD "ufshcd"
 #define UFSHCD_DRIVER_VERSION "0.3"
 
@@ -90,6 +99,29 @@ enum dev_cmd_type {
 	DEV_CMD_TYPE_QUERY		= 0x1,
 };
 
+#define ufs_spin_lock_irqsave(lock, flags)				\
+do {	\
+	if (!oops_in_progress)\
+		spin_lock_irqsave(lock, flags);	\
+} while (0)
+
+#define ufs_spin_unlock_irqrestore(lock, flags)				\
+do {	\
+	if (!oops_in_progress)\
+		spin_unlock_irqrestore(lock, flags);	\
+} while (0)
+
+#define ufs_spin_lock(lock)				\
+do {	\
+	if (!oops_in_progress)\
+		spin_lock(lock);	\
+} while (0)
+
+#define ufs_spin_unlock(lock)				\
+do {	\
+	if (!oops_in_progress)\
+		spin_unlock(lock);	\
+} while (0)
 /**
  * struct uic_command - UIC command structure
  * @command: UIC command
@@ -156,6 +188,16 @@ enum {
 	UFS_ERR_LINKSTARTUP,
 	UFS_ERR_POWER_MODE_CHANGE,
 	UFS_ERR_TASK_ABORT,
+
+#if IS_ENABLED(CONFIG_MI_MEMORY_SYSFS)
+	/* MI errors*/
+	UFS_ERR_UIC_CMD,
+	UFS_ERR_DEV_CMD,
+	UFS_ERR_PWR_CTRL,
+	UFS_ERR_RSP_STATUS,
+	UFS_ERR_ERR_HANDLER,
+#endif
+
 	UFS_ERR_MAX,
 };
 
@@ -232,6 +274,10 @@ struct ufshcd_lrb {
 #endif /* CONFIG_SCSI_UFS_CRYPTO */
 
 	bool req_abort_skip;
+
+#if defined(CONFIG_UFSFEATURE) && defined(CONFIG_UFSHPB)
+	int hpb_ctx_id;
+#endif
 };
 
 /**
@@ -688,6 +734,9 @@ struct ufs_stats {
 	int q_depth;
 	int err_stats[UFS_ERR_MAX];
 	struct ufshcd_req_stat req_stats[TS_NUM_STATS];
+#if IS_ENABLED(CONFIG_MI_MEMORY_SYSFS)
+	bool req_stats_enabled;
+#endif
 	int query_stats_arr[UPIU_QUERY_OPCODE_MAX][MAX_QUERY_IDN];
 
 #endif
@@ -710,6 +759,11 @@ struct ufs_stats {
 	u32 dl_err_cnt[UFS_EC_DL_MAX];
 	u32 dme_err_cnt;
 };
+
+static inline bool is_read_opcode(u8 opcode)
+{
+	return opcode == READ_10 || opcode == READ_16;
+}
 
 /* UFS Host Controller debug print bitmask */
 #define UFSHCD_DBG_PRINT_CLK_FREQ_EN		UFS_BIT(0)
@@ -931,6 +985,12 @@ struct ufs_hba {
 	 */
 	#define UFSHCI_QUIRK_BROKEN_HCE				0x400
 
+	/*
+	* This quirk needs to be enabled if the host controller cannot
+	* support SAMSUNG and WDC interface configuration.
+	*/
+	#define UFS_DEVICE_QUIRK_PA_SYNCLENGTH			0x700
+
 	/* HIBERN8 support is broken */
 	#define UFSHCD_QUIRK_BROKEN_HIBERN8			0x800
 
@@ -1030,6 +1090,8 @@ struct ufs_hba {
 	/* Number of requests aborts */
 	int req_abort_count;
 
+	u32 security_in;
+
 	/* Number of lanes available (1 or 2) for Rx/Tx */
 	u32 lanes_per_direction;
 
@@ -1115,6 +1177,10 @@ struct ufs_hba {
 	bool phy_init_g4;
 	bool force_g4;
 	bool wb_enabled;
+
+#if defined(CONFIG_UFSFEATURE)
+	struct ufsf_feature ufsf;
+#endif
 
 #ifdef CONFIG_SCSI_UFS_CRYPTO
 	/* crypto */
@@ -1394,6 +1460,15 @@ int ufshcd_query_flag(struct ufs_hba *hba, enum query_opcode opcode,
 	enum flag_idn idn, bool *flag_res);
 int ufshcd_read_string_desc(struct ufs_hba *hba, int desc_index,
 			    u8 *buf, u32 size, bool ascii);
+#if defined(CONFIG_UFSFEATURE)
+int ufshcd_exec_dev_cmd(struct ufs_hba *hba,
+			enum dev_cmd_type cmd_type, int timeout);
+int ufshcd_hibern8_hold(struct ufs_hba *hba, bool async);
+void ufshcd_hold_all(struct ufs_hba *hba);
+void ufshcd_release_all(struct ufs_hba *hba);
+int ufshcd_comp_scsi_upiu(struct ufs_hba *hba, struct ufshcd_lrb *lrbp);
+int ufshcd_map_sg(struct ufs_hba *hba, struct ufshcd_lrb *lrbp);
+#endif
 
 int ufshcd_hold(struct ufs_hba *hba, bool async);
 void ufshcd_release(struct ufs_hba *hba, bool no_sched);

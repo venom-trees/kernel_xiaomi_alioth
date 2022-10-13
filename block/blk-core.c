@@ -470,7 +470,9 @@ inline void __blk_run_queue_uncond(struct request_queue *q)
 	 * can wait until all these request_fn calls have finished.
 	 */
 	q->request_fn_active++;
+	preempt_disable();
 	q->request_fn(q);
+	preempt_enable();
 	q->request_fn_active--;
 }
 EXPORT_SYMBOL_GPL(__blk_run_queue_uncond);
@@ -1998,6 +2000,12 @@ void blk_init_request_from_bio(struct request *req, struct bio *bio)
 	else
 		req->ioprio = IOPRIO_PRIO_VALUE(IOPRIO_CLASS_NONE, 0);
 	req->write_hint = bio->bi_write_hint;
+
+#if IS_ENABLED(CONFIG_PERF_HUMANTASK)
+	if (bio->human_task)
+		req->ioprio = 0;
+#endif
+
 	blk_rq_bio_prep(req->q, req, bio);
 }
 EXPORT_SYMBOL_GPL(blk_init_request_from_bio);
@@ -2094,6 +2102,10 @@ get_rq:
 	 */
 	blk_init_request_from_bio(req, bio);
 
+#if IS_ENABLED(CONFIG_PERF_HUMANTASK)
+	if (bio->human_task)
+		where = ELEVATOR_INSERT_FRONT;
+#endif
 	if (test_bit(QUEUE_FLAG_SAME_COMP, &q->queue_flags))
 		req->cpu = raw_smp_processor_id();
 
@@ -2595,6 +2607,9 @@ blk_qc_t submit_bio(struct bio *bio)
 	 */
 	if (workingset_read)
 		psi_memstall_enter(&pflags);
+
+	if (bio->bi_alloc_ts)
+		mm_event_end(BLK_READ_SUBMIT_BIO, bio->bi_alloc_ts);
 
 	ret = generic_make_request(bio);
 
